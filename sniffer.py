@@ -4,17 +4,20 @@ Advanced WiFi Activity Monitor
 Tracks all network activities, websites, and user actions
 """
 
-import os
-import sys
-import signal
-import logging
-from datetime import datetime
-from scapy.all import *
-from scapy.layers.http import HTTPRequest, HTTPResponse
-from scapy.layers.dns import DNS, DNSQR, DNSRR
-from scapy.layers.inet import IP, TCP
-from collections import defaultdict
+import ctypes
 import json
+import logging
+import os
+from pathlib import Path
+import signal
+import sys
+from collections import defaultdict
+from datetime import datetime
+
+from scapy.all import *
+from scapy.layers.dns import DNS, DNSQR
+from scapy.layers.http import HTTPRequest
+from scapy.layers.inet import IP, TCP
 
 # Colors for terminal output
 class Colors:
@@ -27,9 +30,27 @@ class Colors:
     END = '\033[0m'
     BOLD = '\033[1m'
 
-# Configuration
-LOG_DIR = "/var/log/wifi_monitor"
-os.makedirs(LOG_DIR, exist_ok=True)
+APP_NAME = "wifi_monitor"
+
+
+def get_log_dir():
+    """Return a platform-appropriate log directory."""
+    if os.name == "nt":
+        local_app_data = os.environ.get("LOCALAPPDATA")
+        if local_app_data:
+            return Path(local_app_data) / APP_NAME
+        return Path.home() / "AppData" / "Local" / APP_NAME
+
+    if sys.platform == "darwin":
+        return Path.home() / "Library" / "Logs" / APP_NAME
+
+    if hasattr(os, "geteuid") and os.geteuid() == 0:
+        return Path("/var/log") / APP_NAME
+
+    return Path.home() / ".local" / "state" / APP_NAME
+
+
+LOG_DIR = get_log_dir()
 
 # Activity tracking
 host_activities = defaultdict(lambda: {
@@ -54,14 +75,56 @@ stats = {
 
 def setup_logging():
     """Setup logging to file"""
+    LOG_DIR.mkdir(parents=True, exist_ok=True)
     logging.basicConfig(
         level=logging.INFO,
         format='%(asctime)s - %(levelname)s - %(message)s',
         handlers=[
-            logging.FileHandler(f'{LOG_DIR}/monitor.log'),
+            logging.FileHandler(LOG_DIR / 'monitor.log'),
             logging.StreamHandler(sys.stdout)
         ]
     )
+
+
+def is_running_as_admin():
+    """Return True when the process has elevated capture privileges."""
+    if os.name == "nt":
+        try:
+            return bool(ctypes.windll.shell32.IsUserAnAdmin())
+        except (AttributeError, OSError):
+            return False
+
+    if hasattr(os, "geteuid"):
+        return os.geteuid() == 0
+
+    return False
+
+
+def get_default_interface():
+    """Pick a reasonable default from Scapy's detected interfaces."""
+    interfaces = sorted(dict.fromkeys(get_if_list()))
+    if not interfaces:
+        return "Wi-Fi" if os.name == "nt" else "wlan0", interfaces
+
+    if os.name == "nt":
+        preferred_keywords = ("wi-fi", "wifi", "wlan", "wireless", "ethernet")
+    elif sys.platform == "darwin":
+        preferred_keywords = ("en0", "en1", "bridge", "awdl")
+    else:
+        preferred_keywords = ("wlan0", "wlp", "wl", "eth0", "enp", "eno", "enx")
+
+    for keyword in preferred_keywords:
+        for interface in interfaces:
+            lowered = interface.lower()
+            if keyword in lowered and "loopback" not in lowered:
+                return interface, interfaces
+
+    for interface in interfaces:
+        lowered = interface.lower()
+        if lowered not in {"lo", "lo0"} and "loopback" not in lowered:
+            return interface, interfaces
+
+    return interfaces[0], interfaces
 
 def print_banner():
     """Print startup banner"""
@@ -98,7 +161,7 @@ def extract_credentials(packet):
                     log_msg = f"[CREDENTIAL] {timestamp} | IP: {src_ip} | {pattern}{value}"
                     print(f"{Colors.RED}{log_msg}{Colors.END}")
                     
-                    with open(f'{LOG_DIR}/credentials.log', 'a') as f:
+                    with open(LOG_DIR / 'credentials.log', 'a', encoding='utf-8') as f:
                         f.write(log_msg + '\n')
                     
                     stats['credentials_found'] += 1
@@ -126,7 +189,7 @@ def process_dns(packet):
             host_activities[src_ip]['first_seen'] = timestamp
         
         # Save to log
-        with open(f'{LOG_DIR}/dns.log', 'a') as f:
+        with open(LOG_DIR / 'dns.log', 'a', encoding='utf-8') as f:
             f.write(log_msg + '\n')
         
         stats['dns_queries'] += 1
@@ -157,7 +220,7 @@ def process_http(packet):
         host_activities[src_ip]['last_seen'] = timestamp
         
         # Save to log
-        with open(f'{LOG_DIR}/http.log', 'a') as f:
+        with open(LOG_DIR / 'http.log', 'a', encoding='utf-8') as f:
             f.write(log_msg + '\n')
         
         stats['http_requests'] += 1
@@ -263,8 +326,8 @@ def save_report():
             'last_seen': activity['last_seen']
         }
     
-    report_file = f"{LOG_DIR}/report_{datetime.now().strftime('%Y%m%d_%H%M%S')}.json"
-    with open(report_file, 'w') as f:
+    report_file = LOG_DIR / f"report_{datetime.now().strftime('%Y%m%d_%H%M%S')}.json"
+    with open(report_file, 'w', encoding='utf-8') as f:
         json.dump(report, f, indent=2)
     
     print(f"\n{Colors.GREEN}[+] Report saved: {report_file}{Colors.END}")
@@ -279,17 +342,26 @@ def signal_handler(sig, frame):
 
 def main():
     """Main function"""
-    if os.geteuid() != 0:
-        print(f"{Colors.RED}[!] This script requires root privileges{Colors.END}")
+    if not is_running_as_admin():
+        privilege_name = "Administrator" if os.name == "nt" else "root"
+        print(f"{Colors.RED}[!] This script requires {privilege_name} privileges{Colors.END}")
         sys.exit(1)
     
     print_banner()
     setup_logging()
+    default_interface, interfaces = get_default_interface()
+    print(f"{Colors.BLUE}[i] Logs directory: {LOG_DIR}{Colors.END}")
+    if interfaces:
+        preview = ", ".join(interfaces[:8])
+        suffix = "..." if len(interfaces) > 8 else ""
+        print(f"{Colors.BLUE}[i] Detected interfaces: {preview}{suffix}{Colors.END}")
     
     # Get interface
-    interface = input(f"{Colors.CYAN}Enter interface to monitor (default: wlan0): {Colors.END}").strip()
+    interface = input(
+        f"{Colors.CYAN}Enter interface to monitor (default: {default_interface}): {Colors.END}"
+    ).strip()
     if not interface:
-        interface = "wlan0"
+        interface = default_interface
     
     print(f"\n{Colors.GREEN}[+] Starting monitor on {interface}...{Colors.END}")
     print(f"{Colors.YELLOW}[!] Press Ctrl+C to stop and view report{Colors.END}\n")
