@@ -65,11 +65,10 @@ On macOS, running with `sudo` usually means logs end up under `/var/root/Library
    sudo pacman -Sy --needed python python-pip libpcap
    ```
 
-2. Create a virtual environment and install Python dependencies:
+2. Use the `venv/` virtual environment in the current folder and install Python dependencies:
 
    ```bash
-   python3 -m venv .venv
-   source .venv/bin/activate
+   source venv/bin/activate
    pip install --upgrade pip
    pip install -r requirements.txt
    ```
@@ -82,11 +81,10 @@ On macOS, running with `sudo` usually means logs end up under `/var/root/Library
    brew install python
    ```
 
-2. Create a virtual environment and install dependencies:
+2. Use the `venv/` virtual environment in the current folder and install dependencies:
 
    ```bash
-   python3 -m venv .venv
-   source .venv/bin/activate
+   source venv/bin/activate
    pip install --upgrade pip
    pip install -r requirements.txt
    ```
@@ -97,11 +95,10 @@ On macOS, running with `sudo` usually means logs end up under `/var/root/Library
    - Python 3 from https://www.python.org/downloads/windows/
    - Npcap from https://npcap.com/ with **WinPcap API-compatible mode** enabled
 
-2. In **PowerShell (Run as Administrator)**:
+2. In **PowerShell (Run as Administrator)**, use the `venv\` environment in the current folder:
 
    ```powershell
-   py -3 -m venv .venv
-   .\.venv\Scripts\Activate.ps1
+   .\venv\Scripts\Activate.ps1
    python -m pip install --upgrade pip
    pip install -r requirements.txt
    ```
@@ -111,15 +108,15 @@ On macOS, running with `sudo` usually means logs end up under `/var/root/Library
 ### Linux
 
 ```bash
-source .venv/bin/activate
-sudo .venv/bin/python sniffer.py
+source venv/bin/activate
+sudo venv/bin/python sniffer.py
 ```
 
 ### macOS
 
 ```bash
-source .venv/bin/activate
-sudo .venv/bin/python sniffer.py
+source venv/bin/activate
+sudo venv/bin/python sniffer.py
 ```
 
 ### Windows
@@ -127,7 +124,7 @@ sudo .venv/bin/python sniffer.py
 Run **PowerShell as Administrator**:
 
 ```powershell
-.\.venv\Scripts\Activate.ps1
+.\venv\Scripts\Activate.ps1
 python .\sniffer.py
 ```
 
@@ -139,6 +136,48 @@ When the script starts, it:
 4. starts live capture until you press `Ctrl+C`
 
 If the suggested default is wrong, enter another interface name from the detected list.
+
+## Demo
+
+Example run on Linux:
+
+```bash
+$ source venv/bin/activate
+$ sudo venv/bin/python sniffer.py
+
+============================================================
+    Advanced WiFi Activity Monitor
+    Track: Hosts | Websites | Activities | Credentials
+============================================================
+
+[i] Logs directory: /var/log/wifi_monitor
+[i] Detected interfaces: eth0, wlan0, lo
+Enter interface to monitor (default: wlan0): wlan0
+
+[+] Starting monitor on wlan0...
+[!] Press Ctrl+C to stop and view report
+
+[DNS] 2026-04-20 21:10:31 | 192.168.1.15 -> github.com.
+[HTTP] 2026-04-20 21:10:33 | 192.168.1.15 | GET http://example.com/login
+[HTTPS] 2026-04-20 21:10:34 | 192.168.1.15 -> TLS connection
+^C
+[!] Stopping monitor...
+
+============================================================
+MONITORING STATISTICS
+============================================================
+Total Packets:      124
+DNS Queries:        8
+HTTP Requests:      3
+HTTPS Connections:  14
+Credentials Found:  0
+Active Hosts:       4
+============================================================
+
+[+] Report saved: /var/log/wifi_monitor/report_20260420_211041.json
+```
+
+On macOS and Windows the output is the same shape, but the detected interface names and log directory will reflect that platform.
 
 ## Usage notes
 
